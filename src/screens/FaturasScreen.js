@@ -16,7 +16,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+
+const API_URL = 'http://192.168.3.177:8000';
 
 const BANCOS_SUPORTADOS = [
   { nome: 'Nubank', icon: 'credit-card-outline', color: '#8A05BE' },
@@ -77,7 +80,7 @@ export default function FaturasScreen() {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
       const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/csv', 'text/comma-separated-values', 'application/csv', 'text/plain'],
+        type: ['text/csv', 'text/comma-separated-values', 'application/csv', 'text/plain', '*/*'],
         copyToCacheDirectory: true,
       });
 
@@ -104,18 +107,40 @@ export default function FaturasScreen() {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
     try {
-      // Simulação de processamento/upload para a API
-      await new Promise((resolve) => setTimeout(resolve, 1800));
+      // 1. Lê o conteúdo do ficheiro local usando fetch (resolve permissões no Android)
+      const resFile = await fetch(ficheiro.uri);
+      const conteudoCsv = await resFile.text();
+
+      if (!conteudoCsv || !conteudoCsv.trim()) {
+        throw new Error('O ficheiro CSV selecionado está vazio ou ilegível.');
+      }
+
+      // 2. Envia o texto puro para o Backend FastAPI
+      const response = await fetch(`${API_URL}/api/v1/importar-csv-texto`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          conteudo: conteudoCsv,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Erro ao processar ficheiro no servidor.');
+      }
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         'Fatura Processada!',
-        `O arquivo "${ficheiro.name}" foi lido e as transações foram importadas com sucesso.`,
+        data.mensagem || 'As transações do CSV foram importadas com sucesso.',
         [{ text: 'OK', onPress: () => setFicheiro(null) }]
       );
     } catch (error) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Erro', 'Falha ao processar o arquivo no servidor.');
+      Alert.alert('Erro ao Importar', error.message || 'Falha ao processar o ficheiro.');
     } finally {
       setCarregando(false);
     }
@@ -174,7 +199,7 @@ export default function FaturasScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
-          {/* HERO CARD / UPLOAD ZONE */}
+          {/* UPLOAD ZONE */}
           <Animated.View
             style={{
               opacity: cardAnim,
@@ -242,7 +267,7 @@ export default function FaturasScreen() {
                 <View style={styles.fileSelectedBox}>
                   <View style={styles.fileHeaderRow}>
                     <View style={styles.fileIconBox}>
-                      <Feather name="file-check" size={24} color="#00F5D4" />
+                      <Feather name="check-circle" size={24} color="#00F5D4" />
                     </View>
 
                     <View style={styles.fileTextWrap}>

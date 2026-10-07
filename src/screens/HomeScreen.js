@@ -45,7 +45,9 @@ const PLACEHOLDERS = [
 ];
 
 const getCategoriaIcon = (categoria = '') => {
-  const cat = categoria
+  if (!categoria) return CATEGORIA_ICONES.geral;
+
+  const cat = String(categoria)
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
@@ -84,7 +86,6 @@ export default function HomeScreen() {
   const [filtroAtivo, setFiltroAtivo] = useState('todos');
   const [saldoOculto, setSaldoOculto] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
-  const [pulseInput, setPulseInput] = useState(false);
 
   const heroFloat = useRef(new Animated.Value(0)).current;
   const aiPulse = useRef(new Animated.Value(0)).current;
@@ -319,7 +320,7 @@ export default function HomeScreen() {
         if (filtroAtivo === 'todos') return true;
         if (filtroAtivo === 'despesa') return item.tipo === 'despesa';
         if (filtroAtivo === 'receita') return item.tipo === 'receita';
-        return item.categoria?.toLowerCase() === filtroAtivo.toLowerCase();
+        return item.categoria && item.categoria.toLowerCase() === filtroAtivo.toLowerCase();
       }),
     [transacoes, filtroAtivo]
   );
@@ -721,8 +722,6 @@ export default function HomeScreen() {
                 placeholderTextColor="transparent"
                 value={prompt}
                 onChangeText={setPrompt}
-                onFocus={() => setPulseInput(true)}
-                onBlur={() => setPulseInput(false)}
                 onSubmitEditing={enviarComando}
                 returnKeyType="send"
                 selectionColor="#C084FC"
