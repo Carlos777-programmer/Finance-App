@@ -242,6 +242,39 @@ export default function HomeScreen() {
     }
   };
 
+  const handleDeletarTransacao = async (id, descricao) => {
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+    Alert.alert(
+      'Remover Transação',
+      `Deseja apagar "${descricao || 'esta transação'}"?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Remover',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await fetch(`${API_URL}/api/v1/transacoes/${id}`, {
+                method: 'DELETE',
+              });
+
+              if (response.ok) {
+                await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                await carregarDados();
+              } else {
+                throw new Error('Falha ao remover transação');
+              }
+            } catch (error) {
+              await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+              Alert.alert('Erro', 'Não foi possível deletar a transação.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   const alternarPrivacidade = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Animated.sequence([
@@ -422,20 +455,33 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            <View style={styles.valorContainer}>
-              <Text
-                style={[
-                  styles.valor,
-                  isDespesa ? styles.valorDespesa : styles.valorReceita,
+            <View style={styles.valorEExcluirGroup}>
+              <View style={styles.valorContainer}>
+                <Text
+                  style={[
+                    styles.valor,
+                    isDespesa ? styles.valorDespesa : styles.valorReceita,
+                  ]}
+                >
+                  {isDespesa ? '-' : '+'} {formatBRL(valor)}
+                </Text>
+                {valorCritico && (
+                  <View style={styles.alertDot}>
+                    <Feather name="alert-triangle" size={9} color="#FF4A5A" />
+                  </View>
+                )}
+              </View>
+
+              <Pressable
+                onPress={() => handleDeletarTransacao(item.id, item.descricao)}
+                style={({ pressed }) => [
+                  styles.btnTrashTransacao,
+                  pressed && styles.btnTrashPressed,
                 ]}
+                hitSlop={8}
               >
-                {isDespesa ? '-' : '+'} {formatBRL(valor)}
-              </Text>
-              {valorCritico && (
-                <View style={styles.alertDot}>
-                  <Feather name="alert-triangle" size={9} color="#FF4A5A" />
-                </View>
-              )}
+                <Feather name="trash-2" size={13} color="#FF4A5A" />
+              </Pressable>
             </View>
           </GlassSurface>
         </Pressable>
@@ -1419,6 +1465,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 
+  valorEExcluirGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+
   valorContainer: {
     alignItems: 'flex-end',
     marginLeft: 8,
@@ -1438,6 +1490,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,74,90,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+
+  btnTrashTransacao: {
+    width: 28,
+    height: 28,
+    borderRadius: 9,
+    backgroundColor: 'rgba(255,74,90,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,74,90,0.16)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  btnTrashPressed: {
+    transform: [{ scale: 0.88 }],
+    backgroundColor: 'rgba(255,74,90,0.22)',
   },
 
   emptyCard: {
