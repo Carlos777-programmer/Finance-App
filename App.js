@@ -2,12 +2,13 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Feather } from '@expo/vector-icons';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 
 import HomeScreen from './src/screens/HomeScreen';
 import ContasScreen from './src/screens/ContasScreen';
 import FaturasScreen from './src/screens/FaturasScreen';
 import AnalyticsScreen from './src/screens/AnalyticsScreen';
+import MentorScreen from './src/screens/MentorScreen';
 
 const Tab = createBottomTabNavigator();
 
@@ -22,15 +23,16 @@ export default function App() {
           tabBarActiveTintColor: '#00F5D4',
           tabBarInactiveTintColor: '#69758A',
           tabBarLabelStyle: styles.tabBarLabel,
-          tabBarIcon: ({ color, size }) => {
+          tabBarIcon: ({ color }) => {
             let iconName;
 
             if (route.name === 'Home') iconName = 'grid';
             else if (route.name === 'Contas') iconName = 'credit-card';
-            else if (route.name === 'Faturas') iconName = 'file-text';
             else if (route.name === 'Analytics') iconName = 'pie-chart';
+            else if (route.name === 'Mentor') iconName = 'shield';
+            else if (route.name === 'Faturas') iconName = 'file-text';
 
-            return <Feather name={iconName} size={20} color={color} />;
+            return <Feather name={iconName} size={19} color={color} />;
           },
         })}
       >
@@ -48,6 +50,11 @@ export default function App() {
           name="Analytics"
           component={AnalyticsScreen}
           options={{ tabBarLabel: 'Análise' }}
+        />
+        <Tab.Screen
+          name="Mentor"
+          component={MentorScreen}
+          options={{ tabBarLabel: 'Mentor' }}
         />
         <Tab.Screen
           name="Faturas"
@@ -70,7 +77,7 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   tabBarLabel: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '700',
     marginTop: 2,
   },

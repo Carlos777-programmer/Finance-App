@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -6,6 +6,7 @@ import {
   Easing,
   FlatList,
   Keyboard,
+  Modal,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -18,19 +19,46 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 
 const API_URL = 'http://192.168.3.177:8000';
+
+const CATEGORIAS_OPCOES = [
+  { id: 'Alimentação', icon: 'food-fork-drink' },
+  { id: 'Mercado', icon: 'cart' },
+  { id: 'Boletos & Contas', icon: 'file-document-outline' },
+  { id: 'Vestuário & Roupas', icon: 'tshirt-crew' },
+  { id: 'Transporte', icon: 'car-side' },
+  { id: 'Combustível', icon: 'gas-station' },
+  { id: 'Casa & Moradia', icon: 'home-variant' },
+  { id: 'Saúde', icon: 'hospital-box' },
+  { id: 'Assinaturas', icon: 'television-play' },
+  { id: 'Lazer', icon: 'gamepad-variant' },
+  { id: 'Educação', icon: 'school' },
+  { id: 'PIX & Transf', icon: 'swap-horizontal' },
+  { id: 'Salário & Renda', icon: 'cash-multiple' },
+  { id: 'Geral', icon: 'wallet-outline' },
+];
 
 const CATEGORIA_ICONES = {
   alimentacao: 'food-fork-drink',
   restaurante: 'silverware-fork-knife',
   mercado: 'cart',
+  boleto: 'file-document-outline',
+  conta: 'file-document-outline',
+  vestuario: 'tshirt-crew',
+  roupa: 'tshirt-crew',
   transporte: 'car-side',
   uber: 'taxi',
   combustivel: 'gas-station',
+  casa: 'home-variant',
+  moradia: 'home-variant',
   saude: 'hospital-box',
+  assinatura: 'television-play',
+  streaming: 'television-play',
   lazer: 'gamepad-variant',
   educacao: 'school',
+  pix: 'swap-horizontal',
   salario: 'cash-multiple',
   renda: 'trending-up',
   servicos: 'lightning-bolt',
@@ -66,14 +94,15 @@ const formatBRL = (value) =>
 
 const GlassSurface = ({ children, style, intensity = 26 }) => (
   <View style={[styles.glassShell, style]}>
-    <BlurView intensity={intensity} tint="dark" style={StyleSheet.absoluteFill} />
+    <BlurView intensity={intensity} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
     <LinearGradient
       colors={['rgba(255,255,255,0.075)', 'rgba(255,255,255,0.018)']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={StyleSheet.absoluteFill}
+      pointerEvents="none"
     />
-    <View style={styles.glassHighlight} />
+    <View style={styles.glassHighlight} pointerEvents="none" />
     {children}
   </View>
 );
@@ -87,6 +116,10 @@ export default function HomeScreen() {
   const [saldoOculto, setSaldoOculto] = useState(false);
   const [placeholderIndex, setPlaceholderIndex] = useState(0);
 
+  // Estados do Modal de Categoria
+  const [modalCategoriaVisivel, setModalCategoriaVisivel] = useState(false);
+  const [transacaoSelecionada, setTransacaoSelecionada] = useState(null);
+
   const heroFloat = useRef(new Animated.Value(0)).current;
   const aiPulse = useRef(new Animated.Value(0)).current;
   const orbPulse = useRef(new Animated.Value(0)).current;
@@ -95,7 +128,7 @@ export default function HomeScreen() {
   const listAnim = useRef(new Animated.Value(0)).current;
   const placeholderOpacity = useRef(new Animated.Value(1)).current;
 
-  const carregarDados = async () => {
+  const carregarDados = useCallback(async () => {
     try {
       const [resTrans, resContas] = await Promise.all([
         fetch(`${API_URL}/api/v1/transacoes`),
@@ -114,11 +147,15 @@ export default function HomeScreen() {
     } catch (error) {
       console.error('Erro de conexão ao buscar dados:', error);
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      carregarDados();
+    }, [carregarDados])
+  );
 
   useEffect(() => {
-    carregarDados();
-
     Animated.loop(
       Animated.sequence([
         Animated.timing(heroFloat, {
@@ -276,6 +313,34 @@ export default function HomeScreen() {
     );
   };
 
+  const handleAlterarCategoria = async (novaCategoria) => {
+    if (!transacaoSelecionada) return;
+
+    try {
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      const response = await fetch(
+        `${API_URL}/api/v1/transacoes/${transacaoSelecionada.id}/categoria`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ categoria_nome: novaCategoria }),
+        }
+      );
+
+      if (response.ok) {
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setModalCategoriaVisivel(false);
+        setTransacaoSelecionada(null);
+        await carregarDados();
+      } else {
+        throw new Error('Erro ao atualizar categoria');
+      }
+    } catch (error) {
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Erro', 'Não foi possível atualizar a categoria.');
+    }
+  };
+
   const alternarPrivacidade = async () => {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     Animated.sequence([
@@ -299,10 +364,36 @@ export default function HomeScreen() {
     setFiltroAtivo(id);
   };
 
-  const totalSaldosIniciais = contas.reduce(
-    (acc, c) => acc + Number(c.saldo_inicial || 0),
+  // --- CÁLCULO DE PATRIMÔNIO CONSOLIDADO ---
+  const calcularSaldoAtualConta = (conta) => {
+    const saldoInicial = Number(conta.saldo_inicial || 0);
+
+    const fluxoConta = transacoes
+      .filter((t) => t.conta_cartao && t.conta_cartao.toLowerCase() === conta.nome.toLowerCase())
+      .reduce((acc, t) => {
+        const valor = Number(t.valor || 0);
+        return t.tipo === 'receita' ? acc + valor : acc - valor;
+      }, 0);
+
+    return saldoInicial + fluxoConta;
+  };
+
+  const totalSaldosBancos = contas.reduce(
+    (acc, conta) => acc + calcularSaldoAtualConta(conta),
     0
   );
+
+  const movimentacoesSemConta = transacoes.filter((t) => !t.conta_cartao);
+
+  const receitasSemConta = movimentacoesSemConta
+    .filter((t) => t.tipo === 'receita')
+    .reduce((acc, t) => acc + Number(t.valor || 0), 0);
+
+  const despesasSemConta = movimentacoesSemConta
+    .filter((t) => t.tipo === 'despesa')
+    .reduce((acc, t) => acc + Number(t.valor || 0), 0);
+
+  const patrimonioTotal = totalSaldosBancos + receitasSemConta - despesasSemConta;
 
   const totalReceitas = transacoes
     .filter((item) => item.tipo === 'receita')
@@ -311,8 +402,6 @@ export default function HomeScreen() {
   const totalDespesas = transacoes
     .filter((item) => item.tipo === 'despesa')
     .reduce((acc, item) => acc + Number(item.valor || 0), 0);
-
-  const patrimonioTotal = totalSaldosIniciais + totalReceitas - totalDespesas;
 
   const transacoesFiltradas = useMemo(
     () =>
@@ -448,7 +537,18 @@ export default function HomeScreen() {
                 </Text>
 
                 <View style={styles.badgerow}>
-                  <Text style={styles.badge}>{item.categoria || 'Geral'}</Text>
+                  <Pressable
+                    onPress={() => {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      setTransacaoSelecionada(item);
+                      setModalCategoriaVisivel(true);
+                    }}
+                    style={styles.btnCategoriaBadge}
+                  >
+                    <Text style={styles.badge}>{item.categoria || 'Sem Categoria'}</Text>
+                    <Feather name="edit-2" size={9} color="#737F91" style={{ marginLeft: 3 }} />
+                  </Pressable>
+
                   {!!item.conta_cartao && (
                     <Text style={styles.badgeConta}>{item.conta_cartao}</Text>
                   )}
@@ -823,6 +923,60 @@ export default function HomeScreen() {
             </GlassSurface>
           }
         />
+
+        {/* MODAL PARA SELEÇÃO DE CATEGORIA */}
+        <Modal
+          visible={modalCategoriaVisivel}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setModalCategoriaVisivel(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <GlassSurface style={styles.modalContent} intensity={35}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitulo}>SELECIONAR CATEGORIA</Text>
+                <Pressable
+                  onPress={() => setModalCategoriaVisivel(false)}
+                  style={styles.modalCloseBtn}
+                >
+                  <Feather name="x" size={18} color="#94A3B8" />
+                </Pressable>
+              </View>
+
+              <Text style={styles.modalSubtitulo} numberOfLines={1}>
+                {transacaoSelecionada?.descricao}
+              </Text>
+
+              <View style={styles.gridCategorias}>
+                {CATEGORIAS_OPCOES.map((cat) => (
+                  <Pressable
+                    key={cat.id}
+                    onPress={() => handleAlterarCategoria(cat.id)}
+                    style={({ pressed }) => [
+                      styles.itemCategoria,
+                      transacaoSelecionada?.categoria === cat.id && styles.itemCategoriaAtiva,
+                      pressed && { opacity: 0.7 },
+                    ]}
+                  >
+                    <MaterialCommunityIcons
+                      name={cat.icon}
+                      size={20}
+                      color={transacaoSelecionada?.categoria === cat.id ? '#00F5D4' : '#C084FC'}
+                    />
+                    <Text
+                      style={[
+                        styles.textoItemCategoria,
+                        transacaoSelecionada?.categoria === cat.id && styles.textoItemCategoriaAtiva,
+                      ]}
+                    >
+                      {cat.id}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </GlassSurface>
+          </View>
+        </Modal>
       </SafeAreaView>
     </View>
   );
@@ -1441,16 +1595,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 5,
     flexWrap: 'wrap',
+    alignItems: 'center',
   },
 
-  badge: {
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    color: '#737F91',
-    fontSize: 8,
+  btnCategoriaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     paddingVertical: 3,
     paddingHorizontal: 6,
     borderRadius: 5,
-    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+
+  badge: {
+    color: '#94A3B8',
+    fontSize: 8,
+    fontWeight: '600',
   },
 
   badgeConta: {
@@ -1537,5 +1699,81 @@ const styles = StyleSheet.create({
     color: '#667184',
     fontSize: 10,
     textAlign: 'center',
+  },
+
+  // STYLES DO MODAL
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(5,7,10,0.82)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+
+  modalContent: {
+    width: '100%',
+    padding: 20,
+    borderRadius: 24,
+  },
+
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+
+  modalTitulo: {
+    color: '#00F5D4',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.5,
+  },
+
+  modalCloseBtn: {
+    padding: 4,
+  },
+
+  modalSubtitulo: {
+    color: '#F1F5F9',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 16,
+  },
+
+  gridCategorias: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'space-between',
+  },
+
+  itemCategoria: {
+    width: '48%',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+
+  itemCategoriaAtiva: {
+    backgroundColor: 'rgba(0,245,212,0.12)',
+    borderColor: '#00F5D4',
+  },
+
+  textoItemCategoria: {
+    color: '#CBD5E1',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  textoItemCategoriaAtiva: {
+    color: '#00F5D4',
+    fontWeight: '800',
   },
 });

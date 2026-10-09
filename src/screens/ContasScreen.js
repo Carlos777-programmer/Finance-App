@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -22,6 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 
 const API_URL = 'http://192.168.3.177:8000';
 
@@ -38,7 +39,7 @@ const BANCO_ICONES = {
 };
 
 const getBancoInfo = (nome = '') => {
-  const n = nome.toLowerCase();
+  const n = String(nome).toLowerCase();
   for (const key in BANCO_ICONES) {
     if (n.includes(key)) return BANCO_ICONES[key];
   }
@@ -51,22 +52,25 @@ const formatBRL = (value) =>
     currency: 'BRL',
   });
 
+// Adicionado pointerEvents="none" para evitar que o efeito de vidro bloqueie os inputs/toques
 const GlassSurface = ({ children, style, intensity = 26 }) => (
   <View style={[styles.glassShell, style]}>
-    <BlurView intensity={intensity} tint="dark" style={StyleSheet.absoluteFill} />
+    <BlurView intensity={intensity} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
     <LinearGradient
       colors={['rgba(255,255,255,0.075)', 'rgba(255,255,255,0.018)']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={StyleSheet.absoluteFill}
+      pointerEvents="none"
     />
-    <View style={styles.glassHighlight} />
+    <View style={styles.glassHighlight} pointerEvents="none" />
     {children}
   </View>
 );
 
 export default function ContasScreen() {
   const [contas, setContas] = useState([]);
+  const [transacoes, setTransacoes] = useState([]);
   const [nome, setNome] = useState('');
   const [saldo, setSaldo] = useState('');
   const [carregando, setCarregando] = useState(false);
@@ -75,23 +79,35 @@ export default function ContasScreen() {
 
   const listAnim = useRef(new Animated.Value(0)).current;
 
-  const carregarContas = async () => {
+  const carregarDados = useCallback(async () => {
     try {
-      const response = await fetch(`${API_URL}/api/v1/contas`);
-      if (response.ok) {
-        const data = await response.json();
-        setContas(Array.isArray(data) ? data : []);
+      const [resContas, resTrans] = await Promise.all([
+        fetch(`${API_URL}/api/v1/contas`),
+        fetch(`${API_URL}/api/v1/transacoes`),
+      ]);
+
+      if (resContas.ok) {
+        const dataContas = await resContas.json();
+        setContas(Array.isArray(dataContas) ? dataContas : []);
+      }
+
+      if (resTrans.ok) {
+        const dataTrans = await resTrans.json();
+        setTransacoes(Array.isArray(dataTrans) ? dataTrans : []);
       }
     } catch (error) {
-      console.error('Erro ao carregar contas:', error);
+      console.error('Erro ao carregar dados de contas:', error);
     }
-  };
-
-  useEffect(() => {
-    carregarContas();
   }, []);
 
+  useFocusEffect(
+    useCallback(() => {
+      carregarDados();
+    }, [carregarDados])
+  );
+
   useEffect(() => {
+    listAnim.setValue(0);
     Animated.spring(listAnim, {
       toValue: 1,
       friction: 8,
@@ -99,6 +115,24 @@ export default function ContasScreen() {
       useNativeDriver: true,
     }).start();
   }, [contas.length]);
+
+  const calcularSaldoAtualConta = (conta) => {
+    const saldoInicial = Number(conta.saldo_inicial || 0);
+
+    const fluxoConta = transacoes
+      .filter((t) => t.conta_cartao && t.conta_cartao.toLowerCase() === conta.nome.toLowerCase())
+      .reduce((acc, t) => {
+        const valor = Number(t.valor || 0);
+        return t.tipo === 'receita' ? acc + valor : acc - valor;
+      }, 0);
+
+    return saldoInicial + fluxoConta;
+  };
+
+  const totalSaldosBancos = contas.reduce(
+    (acc, conta) => acc + calcularSaldoAtualConta(conta),
+    0
+  );
 
   const abrirModalCriar = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -116,9 +150,16 @@ export default function ContasScreen() {
     setModalVisivel(true);
   };
 
+  const fecharModal = () => {
+    setModalVisivel(false);
+    setContaEditando(null);
+    setNome('');
+    setSaldo('');
+  };
+
   const handleSalvarConta = async () => {
     if (!nome.trim() || !saldo.trim() || carregando) {
-      Alert.alert('Atenção', 'Preencha o nome do banco e o saldo.');
+      Alert.alert('Atenção', 'Preencha o nome do banco e o saldo inicial.');
       return;
     }
 
@@ -138,22 +179,19 @@ export default function ContasScreen() {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          nome,
+          nome: nome.trim(),
           saldo_inicial: parseFloat(saldo.replace(',', '.')) || 0,
         }),
       });
 
-      if (!response.ok) throw new Error('Falha ao processar solicitação');
+      if (!response.ok) throw new Error('Falha ao salvar conta.');
 
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setNome('');
-      setSaldo('');
-      setContaEditando(null);
-      setModalVisivel(false);
-      await carregarContas();
+      fecharModal();
+      await carregarDados();
     } catch (error) {
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Erro', 'Não foi possível salvar a conta.');
+      Alert.alert('Erro ao Salvar', error.message || 'Não foi possível salvar a instituição.');
     } finally {
       setCarregando(false);
     }
@@ -164,7 +202,7 @@ export default function ContasScreen() {
 
     Alert.alert(
       'Remover Conta',
-      `Deseja realmente deletar a conta "${nomeConta}"?`,
+      `Deseja realmente apagar "${nomeConta}"?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -175,9 +213,12 @@ export default function ContasScreen() {
               const response = await fetch(`${API_URL}/api/v1/contas/${id}`, {
                 method: 'DELETE',
               });
+
               if (response.ok) {
                 await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                await carregarContas();
+                await carregarDados();
+              } else {
+                throw new Error('Falha ao deletar');
               }
             } catch (error) {
               await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
@@ -189,14 +230,9 @@ export default function ContasScreen() {
     );
   };
 
-  const totalSaldosBancos = contas.reduce(
-    (acc, c) => acc + Number(c.saldo_inicial || 0),
-    0
-  );
-
   const renderItem = ({ item, index }) => {
     const info = getBancoInfo(item.nome);
-    const valorSaldo = Number(item.saldo_inicial || 0);
+    const valorSaldoAtual = calcularSaldoAtualConta(item);
 
     return (
       <Animated.View
@@ -232,12 +268,21 @@ export default function ContasScreen() {
                 <Text style={styles.bancoNome} numberOfLines={1}>
                   {item.nome}
                 </Text>
-                <Text style={styles.bancoSub}>Toque para editar</Text>
+                <Text style={styles.bancoSub}>
+                  Inicial: {formatBRL(item.saldo_inicial)}
+                </Text>
               </View>
 
               <View style={styles.valorEAcao}>
-                <Text style={styles.bancoSaldo}>{formatBRL(valorSaldo)}</Text>
-                
+                <Text
+                  style={[
+                    styles.bancoSaldo,
+                    valorSaldoAtual < 0 && styles.bancoSaldoNegativo,
+                  ]}
+                >
+                  {formatBRL(valorSaldoAtual)}
+                </Text>
+
                 <View style={styles.acoesGroup}>
                   <Pressable
                     onPress={() => abrirModalEditar(item)}
@@ -348,7 +393,7 @@ export default function ContasScreen() {
 
           <View style={styles.heroInfoFooter}>
             <Feather name="shield" size={13} color="#00F5D4" />
-            <Text style={styles.heroFooterTexto}>Saldos vinculados para cálculos de patrimônio total</Text>
+            <Text style={styles.heroFooterTexto}>Saldos liquidados e sincronizados em tempo real</Text>
           </View>
         </GlassSurface>
 
@@ -384,98 +429,93 @@ export default function ContasScreen() {
           }
         />
 
-        {/* MODAL PARA ADICIONAR / EDITAR CONTA */}
+        {/* MODAL CORRIGIDO PARA INPUTS */}
         <Modal
           visible={modalVisivel}
           animationType="fade"
           transparent
-          onRequestClose={() => setModalVisivel(false)}
+          onRequestClose={fecharModal}
         >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={styles.modalOverlay}>
-              <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={{ width: '100%' }}
-              >
-                <GlassSurface style={styles.modalContent} intensity={40}>
-                  <View style={styles.modalHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Feather
-                        name={contaEditando ? 'edit-3' : 'plus-circle'}
-                        size={18}
-                        color="#C084FC"
-                      />
-                      <Text style={styles.modalTitulo}>
-                        {contaEditando ? 'Editar Instituição' : 'Adicionar Instituição'}
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalOverlay}
+          >
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+              <View style={styles.modalBackdropTouch} />
+            </TouchableWithoutFeedback>
+
+            <GlassSurface style={styles.modalContent} intensity={40}>
+              <View style={styles.modalHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Feather
+                    name={contaEditando ? 'edit-3' : 'plus-circle'}
+                    size={18}
+                    color="#C084FC"
+                  />
+                  <Text style={styles.modalTitulo}>
+                    {contaEditando ? 'Editar Instituição' : 'Adicionar Instituição'}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={fecharModal} hitSlop={10}>
+                  <Feather name="x" size={18} color="#7F8A9D" />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.inputLabel}>NOME DO BANCO OU CARTEIRA</Text>
+              <View style={styles.modalInputCapsule}>
+                <Feather name="home" size={15} color="#7C3AED" style={{ marginRight: 10 }} />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Ex: Nubank, Itaú, Dinheiro..."
+                  placeholderTextColor="#626D80"
+                  value={nome}
+                  onChangeText={setNome}
+                  selectionColor="#C084FC"
+                  editable={true}
+                />
+              </View>
+
+              <Text style={styles.inputLabel}>SALDO INICIAL (R$)</Text>
+              <View style={styles.modalInputCapsule}>
+                <Feather name="dollar-sign" size={15} color="#00F5D4" style={{ marginRight: 10 }} />
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="Ex: 1250.00"
+                  placeholderTextColor="#626D80"
+                  keyboardType="numeric"
+                  value={saldo}
+                  onChangeText={setSaldo}
+                  selectionColor="#C084FC"
+                  editable={true}
+                />
+              </View>
+
+              <View style={styles.modalBotoes}>
+                <TouchableOpacity style={styles.modalBtnCancelar} onPress={fecharModal}>
+                  <Text style={styles.btnTextoCancelar}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.modalBtnSalvar}
+                  onPress={handleSalvarConta}
+                  disabled={carregando}
+                >
+                  <LinearGradient
+                    colors={['#7C3AED', '#6D2ED4']}
+                    style={styles.modalBtnSalvarGradient}
+                  >
+                    {carregando ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <Text style={styles.btnTextoSalvar}>
+                        {contaEditando ? 'Atualizar' : 'Salvar Conta'}
                       </Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => setModalVisivel(false)}
-                      hitSlop={10}
-                    >
-                      <Feather name="x" size={18} color="#7F8A9D" />
-                    </TouchableOpacity>
-                  </View>
-
-                  <Text style={styles.inputLabel}>NOME DO BANCO OU CARTEIRA</Text>
-                  <View style={styles.modalInputCapsule}>
-                    <Feather name="home" size={15} color="#7C3AED" style={{ marginRight: 10 }} />
-                    <TextInput
-                      style={styles.modalInput}
-                      placeholder="Ex: Nubank, Itaú, Dinheiro..."
-                      placeholderTextColor="#626D80"
-                      value={nome}
-                      onChangeText={setNome}
-                      selectionColor="#C084FC"
-                      autoFocus
-                    />
-                  </View>
-
-                  <Text style={styles.inputLabel}>SALDO DA CONTA (R$)</Text>
-                  <View style={styles.modalInputCapsule}>
-                    <Feather name="dollar-sign" size={15} color="#00F5D4" style={{ marginRight: 10 }} />
-                    <TextInput
-                      style={styles.modalInput}
-                      placeholder="Ex: 1250.00"
-                      placeholderTextColor="#626D80"
-                      keyboardType="numeric"
-                      value={saldo}
-                      onChangeText={setSaldo}
-                      selectionColor="#C084FC"
-                    />
-                  </View>
-
-                  <View style={styles.modalBotoes}>
-                    <TouchableOpacity
-                      style={styles.modalBtnCancelar}
-                      onPress={() => setModalVisivel(false)}
-                    >
-                      <Text style={styles.btnTextoCancelar}>Cancelar</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={styles.modalBtnSalvar}
-                      onPress={handleSalvarConta}
-                      disabled={carregando}
-                    >
-                      <LinearGradient
-                        colors={['#7C3AED', '#6D2ED4']}
-                        style={styles.modalBtnSalvarGradient}
-                      >
-                        {carregando ? (
-                          <ActivityIndicator color="#FFFFFF" size="small" />
-                        ) : (
-                          <Text style={styles.btnTextoSalvar}>
-                            {contaEditando ? 'Atualizar' : 'Salvar Conta'}
-                          </Text>
-                        )}
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
-                </GlassSurface>
-              </KeyboardAvoidingView>
-            </View>
-          </TouchableWithoutFeedback>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </GlassSurface>
+          </KeyboardAvoidingView>
         </Modal>
       </SafeAreaView>
     </View>
@@ -795,6 +835,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 
+  bancoSaldoNegativo: {
+    color: '#FF4A5A',
+  },
+
   acoesGroup: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -863,9 +907,14 @@ const styles = StyleSheet.create({
     padding: 18,
   },
 
+  modalBackdropTouch: {
+    ...StyleSheet.absoluteFillObject,
+  },
+
   modalContent: {
     padding: 20,
     borderRadius: 24,
+    zIndex: 10,
   },
 
   modalHeader: {
@@ -890,7 +939,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  modalInputCapsula: {
+  modalInputCapsule: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',

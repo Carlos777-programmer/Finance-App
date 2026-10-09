@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -22,6 +22,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 
 const API_URL = 'http://192.168.3.177:8000';
 
@@ -40,7 +41,7 @@ const CATEGORIA_CONFIG = {
 };
 
 const getCategoriaInfo = (categoria = '') => {
-  const cat = categoria
+  const cat = String(categoria)
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
@@ -59,28 +60,28 @@ const formatBRL = (value) =>
 
 const GlassSurface = ({ children, style, intensity = 26 }) => (
   <View style={[styles.glassShell, style]}>
-    <BlurView intensity={intensity} tint="dark" style={StyleSheet.absoluteFill} />
+    <BlurView intensity={intensity} tint="dark" style={StyleSheet.absoluteFill} pointerEvents="none" />
     <LinearGradient
       colors={['rgba(255,255,255,0.075)', 'rgba(255,255,255,0.018)']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={StyleSheet.absoluteFill}
+      pointerEvents="none"
     />
-    <View style={styles.glassHighlight} />
+    <View style={styles.glassHighlight} pointerEvents="none" />
     {children}
   </View>
 );
 
 export default function AnalyticsScreen() {
   const [transacoes, setTransacoes] = useState([]);
-  const [metaMensal, setMetaMensal] = useState(3000); // Meta padrão R$ 3.000,00
+  const [metaMensal, setMetaMensal] = useState(3000);
   const [modalMetaVisivel, setModalMetaVisivel] = useState(false);
   const [novaMeta, setNovaMeta] = useState('3000');
-  const [carregando, setCarregando] = useState(false);
 
   const heroAnim = useRef(new Animated.Value(0)).current;
 
-  const carregarDados = async () => {
+  const carregarDados = useCallback(async () => {
     try {
       const response = await fetch(`${API_URL}/api/v1/transacoes`);
       if (response.ok) {
@@ -90,11 +91,16 @@ export default function AnalyticsScreen() {
     } catch (error) {
       console.error('Erro ao buscar transações:', error);
     }
-  };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      carregarDados();
+    }, [carregarDados])
+  );
 
   useEffect(() => {
-    carregarDados();
-
+    heroAnim.setValue(0);
     Animated.spring(heroAnim, {
       toValue: 1,
       friction: 8,
@@ -103,7 +109,6 @@ export default function AnalyticsScreen() {
     }).start();
   }, []);
 
-  // Cálculos de Despesas e Categorias
   const totalDespesas = useMemo(() => {
     return transacoes
       .filter((item) => item.tipo === 'despesa')
@@ -115,7 +120,6 @@ export default function AnalyticsScreen() {
     return Math.round((totalDespesas / metaMensal) * 100);
   }, [totalDespesas, metaMensal]);
 
-  // Agrupamento por Categoria
   const despesasPorCategoria = useMemo(() => {
     const mapa = {};
     const despesas = transacoes.filter((t) => t.tipo === 'despesa');
@@ -134,11 +138,14 @@ export default function AnalyticsScreen() {
       .sort((a, b) => b.total - a.total);
   }, [transacoes, totalDespesas]);
 
-  // Cores dinâmicas da barra de progresso do orçamento
   const getCorOrcamento = (pct) => {
     if (pct < 70) return ['#00F5D4', '#10B981'];
     if (pct <= 90) return ['#FF7A00', '#F59E0B'];
     return ['#FF2E93', '#FF4A5A'];
+  };
+
+  const fecharModalMeta = () => {
+    setModalMetaVisivel(false);
   };
 
   const salvarMeta = async () => {
@@ -150,10 +157,9 @@ export default function AnalyticsScreen() {
 
     await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setMetaMensal(valor);
-    setModalMetaVisivel(false);
+    fecharModalMeta();
   };
 
-  // Cálculo de dias restantes no mês
   const hoje = new Date();
   const ultimoDiaMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0).getDate();
   const diasRestantes = Math.max(1, ultimoDiaMes - hoje.getDate() + 1);
@@ -375,7 +381,6 @@ export default function AnalyticsScreen() {
                       <Text style={styles.catValor}>{formatBRL(item.total)}</Text>
                     </View>
 
-                    {/* Barra de Progresso Individual da Categoria */}
                     <View style={styles.catBarFundo}>
                       <View
                         style={[
@@ -394,72 +399,71 @@ export default function AnalyticsScreen() {
           )}
         </ScrollView>
 
-        {/* MODAL PARA EDITAR META MENSAL */}
+        {/* MODAL CORRIGIDO */}
         <Modal
           visible={modalMetaVisivel}
           animationType="fade"
           transparent
-          onRequestClose={() => setModalMetaVisivel(false)}
+          onRequestClose={fecharModalMeta}
         >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-            <View style={styles.modalOverlay}>
-              <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                style={{ width: '100%' }}
-              >
-                <GlassSurface style={styles.modalContent} intensity={40}>
-                  <View style={styles.modalHeader}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                      <Feather name="target" size={18} color="#C084FC" />
-                      <Text style={styles.modalTitulo}>Definir Meta de Orçamento</Text>
-                    </View>
-                    <TouchableOpacity
-                      onPress={() => setModalMetaVisivel(false)}
-                      hitSlop={10}
-                    >
-                      <Feather name="x" size={18} color="#7F8A9D" />
-                    </TouchableOpacity>
-                  </View>
+          <View style={styles.modalOverlay}>
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+              <View style={StyleSheet.absoluteFillObject} />
+            </TouchableWithoutFeedback>
 
-                  <Text style={styles.inputLabel}>LIMITE MENSAL DE GASTOS (R$)</Text>
-                  <View style={styles.modalInputCapsule}>
-                    <Feather name="dollar-sign" size={15} color="#00F5D4" style={{ marginRight: 10 }} />
-                    <TextInput
-                      style={styles.modalInput}
-                      placeholder="Ex: 3000.00"
-                      placeholderTextColor="#626D80"
-                      keyboardType="numeric"
-                      value={novaMeta}
-                      onChangeText={setNovaMeta}
-                      selectionColor="#C084FC"
-                      autoFocus
-                    />
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              style={{ width: '100%', zIndex: 10 }}
+            >
+              <GlassSurface style={styles.modalContent} intensity={40}>
+                <View style={styles.modalHeader}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Feather name="target" size={18} color="#C084FC" />
+                    <Text style={styles.modalTitulo}>Definir Meta de Orçamento</Text>
                   </View>
+                  <TouchableOpacity onPress={fecharModalMeta} hitSlop={10}>
+                    <Feather name="x" size={18} color="#7F8A9D" />
+                  </TouchableOpacity>
+                </View>
 
-                  <View style={styles.modalBotoes}>
-                    <TouchableOpacity
-                      style={styles.modalBtnCancelar}
-                      onPress={() => setModalMetaVisivel(false)}
-                    >
-                      <Text style={styles.btnTextoCancelar}>Cancelar</Text>
-                    </TouchableOpacity>
+                <Text style={styles.inputLabel}>LIMITE MENSAL DE GASTOS (R$)</Text>
+                <View style={styles.modalInputCapsule}>
+                  <Feather name="dollar-sign" size={15} color="#00F5D4" style={{ marginRight: 10 }} />
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="Ex: 3000.00"
+                    placeholderTextColor="#626D80"
+                    keyboardType="numeric"
+                    value={novaMeta}
+                    onChangeText={setNovaMeta}
+                    selectionColor="#C084FC"
+                    editable={true}
+                  />
+                </View>
 
-                    <TouchableOpacity
-                      style={styles.modalBtnSalvar}
-                      onPress={salvarMeta}
+                <View style={styles.modalBotoes}>
+                  <TouchableOpacity
+                    style={styles.modalBtnCancelar}
+                    onPress={fecharModalMeta}
+                  >
+                    <Text style={styles.btnTextoCancelar}>Cancelar</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.modalBtnSalvar}
+                    onPress={salvarMeta}
+                  >
+                    <LinearGradient
+                      colors={['#7C3AED', '#6D2ED4']}
+                      style={styles.modalBtnSalvarGradient}
                     >
-                      <LinearGradient
-                        colors={['#7C3AED', '#6D2ED4']}
-                        style={styles.modalBtnSalvarGradient}
-                      >
-                        <Text style={styles.btnTextoSalvar}>Atualizar Meta</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
-                </GlassSurface>
-              </KeyboardAvoidingView>
-            </View>
-          </TouchableWithoutFeedback>
+                      <Text style={styles.btnTextoSalvar}>Atualizar Meta</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </View>
+              </GlassSurface>
+            </KeyboardAvoidingView>
+          </View>
         </Modal>
       </SafeAreaView>
     </View>
@@ -876,7 +880,7 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  modalInputCapsula: {
+  modalInputCapsule: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(0,0,0,0.45)',
