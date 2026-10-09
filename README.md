@@ -167,7 +167,3 @@ npx expo start
 **Carlos Marques**
 
 [LinkedIn](https://www.linkedin.com/in/carlos-marques-0b9346267/) | [GitHub](https://github.com/Carlos777-programmer)
-
-```
-
-```
