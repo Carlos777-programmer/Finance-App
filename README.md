@@ -52,8 +52,9 @@ Aplicação mobile e backend de gestão financeira pessoal com interface moderna
 ### 3.2 Configurando o Backend (FastAPI)
 
 1. **Acesse a pasta do backend:**
-   ```bash
-   cd backend
+```bash
+cd backend
+```
 
 2. **Crie e ative o ambiente virtual:**
 ```bash
